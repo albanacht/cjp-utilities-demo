@@ -61,18 +61,22 @@
   <div id="statement"></div>
 </div>
 
-<div class="ver">build v5 · live</div>
+<div class="ver">build v6 · live</div>
 
 <script>
-// ---- CONFIG ----
-var SHEET_ID = "1xUw9BAnSpIAF_tbFR8elrUhhYj8nLVjQfEO8Z6oxxzc";
-// username -> {pw, tab (exact sheet-tab name), name}
+// Published-to-web CSV links (one per tab). Order does not matter —
+// the page reads each tab's title to know which owner it is.
+var CSV_URLS = [
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRg61MXwqRYxPOC6rF27YQnB7NQsoxX_ObME5q66YtEePFA9pGS0jiNT4QGjjw28nii4nXokYMr2504/pub?gid=1586215662&single=true&output=csv",
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRg61MXwqRYxPOC6rF27YQnB7NQsoxX_ObME5q66YtEePFA9pGS0jiNT4QGjjw28nii4nXokYMr2504/pub?gid=193216564&single=true&output=csv",
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vRg61MXwqRYxPOC6rF27YQnB7NQsoxX_ObME5q66YtEePFA9pGS0jiNT4QGjjw28nii4nXokYMr2504/pub?gid=1922786771&single=true&output=csv"
+];
+
 var OWNERS = {
-  ivanov:  {pw:"ivanov123",  tab:"Ivanov",  name:"Ivanov"},
-  petrov:  {pw:"petrov123",  tab:"Petrov",  name:"Petrov"},
-  sidorov: {pw:"sidorov123", tab:"Sidorov", name:"Sidorov"}
+  ivanov:  {pw:"ivanov123",  name:"Ivanov"},
+  petrov:  {pw:"petrov123",  name:"Petrov"},
+  sidorov: {pw:"sidorov123", name:"Sidorov"}
 };
-// built-in fallback (used only if the sheet can't be reached)
 var FALLBACK = {
   ivanov:[{m:"2026-03",w:4494,e:1284,t:5778,d:5000,b:-778},{m:"2026-04",w:3210,e:1391,t:4601,d:3000,b:-2379}],
   petrov:[{m:"2026-03",w:4108.8,e:1177,t:5285.8,d:6000,b:714.2},{m:"2026-04",w:3723.6,e:1123.5,t:4847.1,d:0,b:-4132.9}],
@@ -81,7 +85,6 @@ var FALLBACK = {
 
 function money(n){ return (n<0?"-":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) + " THB"; }
 function num(s){ var v=parseFloat(String(s).replace(/[^0-9.\-]/g,"")); return isNaN(v)?0:v; }
-function csvUrl(tab){ return "https://docs.google.com/spreadsheets/d/"+SHEET_ID+"/gviz/tq?tqx=out:csv&sheet="+encodeURIComponent(tab)+"&t="+Date.now(); }
 
 function parseCSV(text){
   var rows=[],row=[],cur="",q=false;
@@ -98,23 +101,26 @@ function parseCSV(text){
   return rows;
 }
 
-// turn sheet rows into [{m,w,e,t,d,b}]
-function rowsFromSheet(text){
-  var rows=parseCSV(text), h=-1;
+// returns {name, rows:[{m,w,e,t,d,b}]}
+function parseTab(text){
+  var rows=parseCSV(text);
+  var title=(rows[0]&&rows[0][0])||"";       // e.g. "Ivanov — utilities"
+  var name=title.split("—")[0].split("-")[0].trim();
+  var h=-1;
   for(var i=0;i<rows.length;i++){
     var j=rows[i].join(",").toLowerCase();
     if(j.indexOf("deposit")>=0 && j.indexOf("balance")>=0){ h=i; break; }
   }
-  if(h<0) throw new Error("sheet layout not found");
   var out=[];
-  for(var k=h+1;k<rows.length;k++){
-    var r=rows[k]; if(!r) continue;
-    var m=(r[1]||"").trim();
-    if(!m || m.toLowerCase()==="opening") continue;
-    out.push({ m:m, w:num(r[5]), e:num(r[9]), t:num(r[10]), d:num(r[0]), b:num(r[11]) });
+  if(h>=0){
+    for(var k=h+1;k<rows.length;k++){
+      var r=rows[k]; if(!r) continue;
+      var m=(r[1]||"").trim();
+      if(!m || m.toLowerCase()==="opening") continue;
+      out.push({ m:m, w:num(r[5]), e:num(r[9]), t:num(r[10]), d:num(r[0]), b:num(r[11]) });
+    }
   }
-  if(!out.length) throw new Error("no month rows");
-  return out;
+  return { name:name, rows:out };
 }
 
 function doLogin(){
@@ -130,12 +136,21 @@ function doLogin(){
 
 function loadOwner(u){
   var o=OWNERS[u];
-  // show shell immediately so it's never blank
-  showStatement(o.name, FALLBACK[u], "loading");
-  fetch(csvUrl(o.tab))
-    .then(function(res){ if(!res.ok) throw new Error("HTTP "+res.status); return res.text(); })
-    .then(function(text){ showStatement(o.name, rowsFromSheet(text), "live"); })
-    .catch(function(err){ showStatement(o.name, FALLBACK[u], "fallback"); });
+  showStatement(o.name, FALLBACK[u], "loading");     // never blank
+  var wanted=o.name.toLowerCase();
+  var fetches=CSV_URLS.map(function(url){
+    return fetch(url).then(function(r){ return r.ok?r.text():""; }).catch(function(){ return ""; });
+  });
+  Promise.all(fetches).then(function(texts){
+    var match=null;
+    for(var i=0;i<texts.length;i++){
+      if(!texts[i]) continue;
+      var tab=parseTab(texts[i]);
+      if(tab.name.toLowerCase()===wanted && tab.rows.length){ match=tab; break; }
+    }
+    if(match) showStatement(match.name, match.rows, "live");
+    else showStatement(o.name, FALLBACK[u], "fallback");
+  });
 }
 
 function showStatement(name, rows, mode){
