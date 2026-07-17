@@ -4,6 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>CJP Utilities — Owner Portal</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
   body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f4f6f7;color:#233;}
   .top{background:#1F4E5F;color:#fff;padding:16px 22px;}
@@ -38,6 +39,13 @@
   .note{font-size:12px;color:#667;margin-top:10px}
   .ver{position:fixed;bottom:8px;right:10px;font-size:11px;color:#9aa;background:#fff;padding:2px 7px;border-radius:6px;border:1px solid #eee}
   .backbtn{background:none;border:0;color:#1F4E5F;font-size:13px;cursor:pointer;margin-bottom:12px;padding:0}
+  .pay-panel{background:#fff;border:1px solid #e2e8ea;border-radius:12px;padding:20px;margin-top:18px;text-align:center}
+  .pay-panel h3{margin:0 0 4px;color:#1F4E5F;font-size:16px}
+  .pay-panel .amt{font-size:22px;font-weight:bold;color:#c0392b;margin:6px 0 14px}
+  #qr{display:inline-block;padding:10px;background:#fff;border:1px solid #eee;border-radius:10px}
+  #qr img{display:block}
+  .pplogo{font-size:12px;color:#667;margin-top:8px}
+  .slipbtn{margin-top:16px;padding:11px 20px;background:#1e8449;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer}
 </style>
 </head>
 <body>
@@ -61,16 +69,21 @@
   <div id="statement"></div>
 </div>
 
-<div class="ver">build v7 · live</div>
+<div class="ver">build v8 · live + pay</div>
 
 <script>
-// Published-to-web CSV links (one per tab). Order does not matter —
-// the page reads each tab's title to know which owner it is.
+// ================= CONFIG =================
 var CSV_URLS = [
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRg61MXwqRYxPOC6rF27YQnB7NQsoxX_ObME5q66YtEePFA9pGS0jiNT4QGjjw28nii4nXokYMr2504/pub?gid=1586215662&single=true&output=csv",
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRg61MXwqRYxPOC6rF27YQnB7NQsoxX_ObME5q66YtEePFA9pGS0jiNT4QGjjw28nii4nXokYMr2504/pub?gid=193216564&single=true&output=csv",
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vRg61MXwqRYxPOC6rF27YQnB7NQsoxX_ObME5q66YtEePFA9pGS0jiNT4QGjjw28nii4nXokYMr2504/pub?gid=1922786771&single=true&output=csv"
 ];
+var PROMPTPAY_ID = "0812345678";        // <-- DUMMY. Replace with CJP's real PromptPay phone or 13-digit tax ID.
+// Google Form for slip upload. Leave "" for demo (shows how the owner is tagged).
+// When you make the form, paste its pre-fill base here, using OWNER and AMOUNT as placeholders, e.g.:
+//   "https://docs.google.com/forms/d/e/XXXX/viewform?usp=pp_url&entry.111=OWNER&entry.222=AMOUNT"
+var SLIP_FORM_URL = "";
+// =========================================
 
 var OWNERS = {
   ivanov:  {pw:"ivanov123",  name:"Ivanov"},
@@ -86,6 +99,19 @@ var FALLBACK = {
 function money(n){ return (n<0?"-":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) + " THB"; }
 function num(s){ var v=parseFloat(String(s).replace(/[^0-9.\-]/g,"")); return isNaN(v)?0:v; }
 
+// ---- PromptPay QR payload (EMVCo) ----
+function crc16(s){ var c=0xFFFF; for(var i=0;i<s.length;i++){ c^=s.charCodeAt(i)<<8; for(var j=0;j<8;j++){ c=(c&0x8000)?((c<<1)^0x1021):(c<<1); c&=0xFFFF; } } return ('000'+c.toString(16).toUpperCase()).slice(-4); }
+function tlv(id,v){ return id+('00'+v.length).slice(-2)+v; }
+function promptPay(id, amount){
+  var d=String(id).replace(/\D/g,'');
+  var target = d.length===13 ? tlv('02',d) : tlv('01','0066'+d.replace(/^0/,''));
+  var merchant = tlv('29', tlv('00','A000000677010111')+target);
+  var p = tlv('00','01') + tlv('01', amount?'12':'11') + merchant + tlv('53','764');
+  if(amount) p += tlv('54', Number(amount).toFixed(2));
+  p += tlv('58','TH') + '6304';
+  return p + crc16(p);
+}
+
 function parseCSV(text){
   var rows=[],row=[],cur="",q=false;
   for(var i=0;i<text.length;i++){
@@ -100,35 +126,25 @@ function parseCSV(text){
   if(cur!==""||row.length){row.push(cur);rows.push(row);}
   return rows;
 }
-
-// returns {name, rows:[{m,w,e,t,d,b}]}
 function parseTab(text){
   var rows=parseCSV(text);
-  var title=(rows[0]&&rows[0][0])||"";       // e.g. "Ivanov — utilities"
+  var title=(rows[0]&&rows[0][0])||"";
   var name=title.split("—")[0].split("-")[0].trim();
   var h=-1;
-  for(var i=0;i<rows.length;i++){
-    var j=rows[i].join(",").toLowerCase();
-    if(j.indexOf("deposit")>=0 && j.indexOf("balance")>=0){ h=i; break; }
-  }
+  for(var i=0;i<rows.length;i++){ var j=rows[i].join(",").toLowerCase(); if(j.indexOf("deposit")>=0&&j.indexOf("balance")>=0){h=i;break;} }
   var out=[];
-  if(h>=0){
-    for(var k=h+1;k<rows.length;k++){
-      var r=rows[k]; if(!r) continue;
-      var m=(r[1]||"").trim();
-      if(!m || m.toLowerCase()==="opening") continue;
-      out.push({ m:m, w:num(r[5]), e:num(r[9]), t:num(r[10]), d:num(r[0]), b:num(r[11]) });
-    }
-  }
-  return { name:name, rows:out };
+  if(h>=0){ for(var k=h+1;k<rows.length;k++){ var r=rows[k]; if(!r)continue; var m=(r[1]||"").trim(); if(!m||m.toLowerCase()==="opening")continue; out.push({m:m,w:num(r[5]),e:num(r[9]),t:num(r[10]),d:num(r[0]),b:num(r[11])}); } }
+  return {name:name, rows:out};
 }
+
+var CURRENT = {name:"", owe:0};
 
 function doLogin(){
   var msg=document.getElementById('msg');
   try{
     var u=(document.getElementById('u').value||"").trim().toLowerCase();
     var p=(document.getElementById('p').value||"").trim();
-    if(!OWNERS[u] || OWNERS[u].pw!==p){ msg.className="msg err"; msg.textContent="Wrong username or password."; return; }
+    if(!OWNERS[u]||OWNERS[u].pw!==p){ msg.className="msg err"; msg.textContent="Wrong username or password."; return; }
     msg.className="msg ok"; msg.textContent="Signed in — loading your statement…";
     loadOwner(u);
   }catch(err){ msg.className="msg err"; msg.textContent="Error: "+err.message; }
@@ -136,19 +152,15 @@ function doLogin(){
 
 function loadOwner(u){
   var o=OWNERS[u];
-  showStatement(o.name, FALLBACK[u], "loading");     // never blank
+  showStatement(o.name, FALLBACK[u], "loading");
   var wanted=o.name.toLowerCase();
   var fetches=CSV_URLS.map(function(url){
-    var fresh = url + "&_cb=" + Date.now();   // cache-buster: always ask for freshest copy
-    return fetch(fresh, {cache:"no-store"}).then(function(r){ return r.ok?r.text():""; }).catch(function(){ return ""; });
+    var fresh=url+"&_cb="+Date.now();
+    return fetch(fresh,{cache:"no-store"}).then(function(r){return r.ok?r.text():"";}).catch(function(){return "";});
   });
   Promise.all(fetches).then(function(texts){
     var match=null;
-    for(var i=0;i<texts.length;i++){
-      if(!texts[i]) continue;
-      var tab=parseTab(texts[i]);
-      if(tab.name.toLowerCase()===wanted && tab.rows.length){ match=tab; break; }
-    }
+    for(var i=0;i<texts.length;i++){ if(!texts[i])continue; var tab=parseTab(texts[i]); if(tab.name.toLowerCase()===wanted&&tab.rows.length){match=tab;break;} }
     if(match) showStatement(match.name, match.rows, "live");
     else showStatement(o.name, FALLBACK[u], "fallback");
   });
@@ -167,6 +179,21 @@ function showStatement(name, rows, mode){
              : mode==="loading" ? "<div class='status'>Loading live data…</div>"
              : "<div class='status fallback'>&#9888; Couldn't reach the sheet — showing built-in sample data</div>";
 
+  CURRENT.name = name;
+  CURRENT.owe = bal<0 ? Math.abs(bal) : 0;
+
+  var payPanel = "";
+  if(bal<0){
+    payPanel =
+      "<div class='pay-panel'>"+
+        "<h3>Pay your balance</h3>"+
+        "<div class='amt'>"+money(Math.abs(bal))+"</div>"+
+        "<div id='qr'></div>"+
+        "<div class='pplogo'>Scan with any Thai banking app &middot; PromptPay</div>"+
+        "<button class='slipbtn' type='button' onclick='uploadSlip()'>I&#39;ve paid — upload slip</button>"+
+      "</div>";
+  }
+
   var out=
     "<button class='backbtn' type='button' onclick='signOut()'>&larr; Sign out</button>"+
     "<div class='who'>"+name+"</div>"+status+
@@ -176,10 +203,30 @@ function showStatement(name, rows, mode){
       "<div class='card'><div class='k'>Total charged</div><div class='v'>"+money(totC)+"</div></div>"+
     "</div>"+
     "<table><thead><tr><th>Month</th><th>Water charge</th><th>Elec charge</th><th>Total charge</th><th>Deposited</th><th>Balance</th></tr></thead><tbody>"+html+"</tbody></table>"+
-    "<div class='note'>Balance carries forward each month. Green = credit; red = amount to pay. Charges include 7% VAT.</div>";
+    "<div class='note'>Balance carries forward each month. Green = credit; red = amount to pay. Charges include 7% VAT.</div>"+
+    payPanel;
 
   document.getElementById('loginBox').style.display="none";
   var s=document.getElementById('statement'); s.innerHTML=out; s.scrollIntoView();
+
+  if(bal<0){
+    var qEl=document.getElementById('qr');
+    if(qEl && window.QRCode){
+      try{ new QRCode(qEl, { text: promptPay(PROMPTPAY_ID, Math.abs(bal)), width:190, height:190, correctLevel: QRCode.CorrectLevel.M }); }
+      catch(e){ qEl.textContent = "QR unavailable"; }
+    }
+  }
+}
+
+function uploadSlip(){
+  if(SLIP_FORM_URL){
+    var url = SLIP_FORM_URL
+      .replace("OWNER", encodeURIComponent(CURRENT.name))
+      .replace("AMOUNT", encodeURIComponent(CURRENT.owe.toFixed(2)));
+    window.open(url, "_blank");
+  } else {
+    alert("Demo:\nThis opens the slip-upload form already tagged as\n\nOwner: "+CURRENT.name+"\nAmount: "+money(CURRENT.owe)+"\n\nSo CJP always knows exactly who paid — no matching needed.");
+  }
 }
 
 function signOut(){
