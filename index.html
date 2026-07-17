@@ -61,7 +61,7 @@
   <div id="statement"></div>
 </div>
 
-<div class="ver">build v6 · live</div>
+<div class="ver">build v7 · live</div>
 
 <script>
 // Published-to-web CSV links (one per tab). Order does not matter —
@@ -139,7 +139,8 @@ function loadOwner(u){
   showStatement(o.name, FALLBACK[u], "loading");     // never blank
   var wanted=o.name.toLowerCase();
   var fetches=CSV_URLS.map(function(url){
-    return fetch(url).then(function(r){ return r.ok?r.text():""; }).catch(function(){ return ""; });
+    var fresh = url + "&_cb=" + Date.now();   // cache-buster: always ask for freshest copy
+    return fetch(fresh, {cache:"no-store"}).then(function(r){ return r.ok?r.text():""; }).catch(function(){ return ""; });
   });
   Promise.all(fetches).then(function(texts){
     var match=null;
