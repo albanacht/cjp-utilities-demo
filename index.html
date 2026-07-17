@@ -45,7 +45,6 @@
   .hint{font-size:11px;color:#8894a0;margin-top:16px;line-height:1.5;border-top:1px solid var(--line);padding-top:12px}
   .hidden{display:none}
   .foot{font-size:11px;color:#99a;text-align:center;margin:26px 0}
-  #loading{padding:40px;text-align:center;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -56,10 +55,10 @@
     <h2>CJP Utilities</h2>
     <div class="sub">Owner portal — sign in</div>
     <label for="u">Username</label>
-    <input id="u" autocomplete="username" autofocus/>
+    <input id="u" autocomplete="off" autofocus/>
     <label for="p">Password</label>
-    <input id="p" type="password" autocomplete="current-password"/>
-    <button id="loginBtn">Sign in</button>
+    <input id="p" type="password" autocomplete="off"/>
+    <button id="loginBtn" onclick="tryLogin()">Sign in</button>
     <div class="err" id="err"></div>
     <div class="hint"><b>Demo logins:</b><br>
       ivanov / ivanov123 &nbsp;·&nbsp; petrov / petrov123 &nbsp;·&nbsp; sidorov / sidorov123</div>
@@ -73,139 +72,90 @@
       <h1>CJP Utilities — Owner Statement</h1>
       <p>Water &amp; electricity — deposits, charges and balance by month</p>
     </div>
-    <button id="logout">Sign out</button>
+    <button id="logout" onclick="signOut()">Sign out</button>
   </header>
   <div class="wrap">
     <div class="who" id="who"></div>
-    <div id="loading">Loading your statement…</div>
-    <div id="content" class="hidden">
-      <div class="cards">
-        <div class="card"><div class="k">Current balance</div><div class="v" id="balv"></div><div id="balpill"></div></div>
-        <div class="card"><div class="k">Total deposited</div><div class="v" id="depv"></div></div>
-        <div class="card"><div class="k">Total charged</div><div class="v" id="chgv"></div></div>
-      </div>
-      <table>
-        <thead><tr>
-          <th>Month</th><th>Water charge</th><th>Elec charge</th><th>Total charge</th><th>Deposited</th><th>Balance</th>
-        </tr></thead>
-        <tbody id="rows"></tbody>
-      </table>
-      <div class="note">Balance carries forward each month.
-        <b style="color:var(--credit)">Green</b> = credit; <b style="color:var(--pay)">red</b> = amount to pay.
-        Charges include 7% VAT.</div>
+    <div class="cards">
+      <div class="card"><div class="k">Current balance</div><div class="v" id="balv"></div><div id="balpill"></div></div>
+      <div class="card"><div class="k">Total deposited</div><div class="v" id="depv"></div></div>
+      <div class="card"><div class="k">Total charged</div><div class="v" id="chgv"></div></div>
     </div>
-    <div class="foot">Live from the CJP Utilities sheet. Demo login only — not secure storage.</div>
+    <table>
+      <thead><tr>
+        <th>Month</th><th>Water charge</th><th>Elec charge</th><th>Total charge</th><th>Deposited</th><th>Balance</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="note">Balance carries forward each month.
+      <b style="color:var(--credit)">Green</b> = credit; <b style="color:var(--pay)">red</b> = amount to pay.
+      Charges include 7% VAT.</div>
+    <div class="foot">Demo — sample data. Login is for demonstration only.</div>
   </div>
 </div>
 
 <script>
-// ---- CONFIG ----------------------------------------------------------------
-const SHEET_ID = "1xUw9BAnSpIAF_tbFR8elrUhhYj8nLVjQfEO8Z6oxxzc";
-// username -> {pw, tab (sheet name), name}
-const CREDS = {
-  ivanov:  {pw:"ivanov123",  tab:"Ivanov",  name:"Ivanov"},
-  petrov:  {pw:"petrov123",  tab:"Petrov",  name:"Petrov"},
-  sidorov: {pw:"sidorov123", tab:"Sidorov", name:"Sidorov"},
+// -------- demo data (values already computed with 7% VAT) --------
+var DATA = {
+  ivanov: { name:"Ivanov", rows:[
+    {month:"2026-03", water:4494.00, elec:1284.00, total:5778.00, deposit:5000, balance:-778.00},
+    {month:"2026-04", water:3210.00, elec:1391.00, total:4601.00, deposit:3000, balance:-2379.00}
+  ]},
+  petrov: { name:"Petrov", rows:[
+    {month:"2026-03", water:4108.80, elec:1177.00, total:5285.80, deposit:6000, balance:714.20},
+    {month:"2026-04", water:3723.60, elec:1123.50, total:4847.10, deposit:0,    balance:-4132.90}
+  ]},
+  sidorov: { name:"Sidorov", rows:[
+    {month:"2026-03", water:6034.80, elec:1498.00, total:7532.80, deposit:4000, balance:-3532.80},
+    {month:"2026-04", water:5521.20, elec:1391.00, total:6912.20, deposit:4000, balance:-6445.00}
+  ]}
 };
-// ---------------------------------------------------------------------------
+var CREDS = { ivanov:"ivanov123", petrov:"petrov123", sidorov:"sidorov123" };
 
-const money = n => (n<0?"-":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) + " ฿";
-const csvUrl = tab => `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+function money(n){ return (n<0?"-":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) + " ฿"; }
 
-// minimal CSV parser (handles quoted fields)
-function parseCSV(text){
-  const rows=[]; let row=[], cur="", q=false;
-  for(let i=0;i<text.length;i++){
-    const c=text[i];
-    if(q){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=c; }
-    else { if(c==='"') q=true;
-      else if(c===','){ row.push(cur); cur=""; }
-      else if(c==='\n'){ row.push(cur); rows.push(row); row=[]; cur=""; }
-      else if(c==='\r'){}
-      else cur+=c; }
-  }
-  if(cur!==""||row.length){ row.push(cur); rows.push(row); }
-  return rows;
-}
-const num = s => { const v=parseFloat(String(s).replace(/[^0-9.\-]/g,"")); return isNaN(v)?0:v; };
-
-async function loadOwner(rec){
-  document.getElementById('who').textContent = rec.name;
-  document.getElementById('loading').classList.remove('hidden');
-  document.getElementById('content').classList.add('hidden');
-  try{
-    const res = await fetch(csvUrl(rec.tab));
-    if(!res.ok) throw new Error("fetch failed "+res.status);
-    const rows = parseCSV(await res.text());
-    // find header row (contains "Deposit" and "Balance")
-    let h=-1;
-    for(let i=0;i<rows.length;i++){
-      const j=rows[i].join(",").toLowerCase();
-      if(j.includes("deposit")&&j.includes("balance")){ h=i; break; }
-    }
-    if(h<0) throw new Error("layout not recognised");
-    // columns: 0 Deposit,1 Month,2 Wbeg,3 Wend,4 Wused,5 Wcharge,6 Ebeg,7 Eend,8 Eused,9 Echarge,10 Total,11 Balance
-    const data=[];
-    for(let i=h+1;i<rows.length;i++){
-      const r=rows[i]; if(!r) continue;
-      const month=(r[1]||"").trim();
-      if(month.toLowerCase()==="opening") continue;
-      if(!month) continue;                       // skip empty future rows
-      data.push({
-        month, deposit:num(r[0]), water:num(r[5]), elec:num(r[9]),
-        total:num(r[10]), balance:num(r[11])
-      });
-    }
-    render(data);
-  }catch(e){
-    document.getElementById('loading').textContent =
-      "Couldn't load data. Make sure the sheet is shared as 'Anyone with the link — Viewer'. ("+e.message+")";
-  }
-}
-
-function render(data){
-  const tb=document.getElementById('rows'); tb.innerHTML='';
-  let totDep=0, totChg=0;
-  data.forEach(r=>{
-    totDep+=r.deposit; totChg+=r.total;
-    const cls=r.balance<0?'pay':'credit';
-    const tr=document.createElement('tr');
-    tr.innerHTML=`<td>${r.month}</td><td>${money(r.water)}</td><td>${money(r.elec)}</td>`+
-                 `<td>${money(r.total)}</td><td>${money(r.deposit)}</td>`+
-                 `<td class="bal ${cls}">${money(r.balance)}</td>`;
+function render(owner){
+  var o = DATA[owner];
+  document.getElementById('who').textContent = o.name;
+  var tb = document.getElementById('rows'); tb.innerHTML = '';
+  var totDep=0, totChg=0;
+  for(var i=0;i<o.rows.length;i++){
+    var r=o.rows[i]; totDep+=r.deposit; totChg+=r.total;
+    var cls = r.balance<0 ? 'pay' : 'credit';
+    var tr=document.createElement('tr');
+    tr.innerHTML = '<td>'+r.month+'</td><td>'+money(r.water)+'</td><td>'+money(r.elec)+'</td>'+
+                   '<td>'+money(r.total)+'</td><td>'+money(r.deposit)+'</td>'+
+                   '<td class="bal '+cls+'">'+money(r.balance)+'</td>';
     tb.appendChild(tr);
-  });
-  const bal = data.length ? data[data.length-1].balance : 0;
-  const balv=document.getElementById('balv');
-  balv.textContent=money(bal); balv.style.color=bal<0?'var(--pay)':'var(--credit)';
+  }
+  var bal = o.rows[o.rows.length-1].balance;
+  var balv = document.getElementById('balv');
+  balv.textContent = money(bal); balv.style.color = bal<0 ? 'var(--pay)' : 'var(--credit)';
   document.getElementById('balpill').innerHTML =
-    bal<0?`<span class="pill pay">To pay</span>`:`<span class="pill credit">In credit</span>`;
-  document.getElementById('depv').textContent=money(totDep);
-  document.getElementById('chgv').textContent=money(totChg);
-  document.getElementById('loading').classList.add('hidden');
-  document.getElementById('content').classList.remove('hidden');
+    bal<0 ? '<span class="pill pay">To pay</span>' : '<span class="pill credit">In credit</span>';
+  document.getElementById('depv').textContent = money(totDep);
+  document.getElementById('chgv').textContent = money(totChg);
 }
 
 function tryLogin(){
-  const u=document.getElementById('u').value.trim().toLowerCase();
-  const p=document.getElementById('p').value;
-  const rec=CREDS[u];
-  if(rec && rec.pw===p){
-    document.getElementById('err').textContent='';
+  var u = document.getElementById('u').value.trim().toLowerCase();
+  var p = document.getElementById('p').value.trim();
+  if(CREDS[u] && CREDS[u] === p){
+    document.getElementById('err').textContent = '';
     document.getElementById('login').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
-    loadOwner(rec);
+    render(u);
   } else {
-    document.getElementById('err').textContent='Wrong username or password.';
+    document.getElementById('err').textContent = 'Wrong username or password.';
   }
 }
-document.getElementById('loginBtn').addEventListener('click',tryLogin);
-document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')tryLogin();});
-document.getElementById('u').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('p').focus();});
-document.getElementById('logout').addEventListener('click',()=>{
+function signOut(){
   document.getElementById('app').classList.add('hidden');
   document.getElementById('login').classList.remove('hidden');
   document.getElementById('u').value=''; document.getElementById('p').value='';
+}
+document.addEventListener('keydown', function(e){
+  if(e.key==='Enter' && !document.getElementById('login').classList.contains('hidden')) tryLogin();
 });
 </script>
 </body>
