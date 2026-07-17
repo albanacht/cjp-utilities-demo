@@ -21,7 +21,10 @@
   .msg.err{color:#c0392b}
   .msg.ok{color:#1e8449}
   .hint{font-size:11px;color:#8894a0;margin-top:16px;line-height:1.5;border-top:1px solid #eee;padding-top:12px}
-  .who{font-size:17px;font-weight:bold;margin:0 0 14px}
+  .who{font-size:17px;font-weight:bold;margin:0 0 4px}
+  .status{font-size:12px;margin:0 0 14px}
+  .status.live{color:#1e8449}
+  .status.fallback{color:#b26a00}
   .cards{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
   .card{background:#fff;border:1px solid #e2e8ea;border-radius:12px;padding:16px 18px;flex:1;min-width:150px}
   .card .k{font-size:12px;color:#667;text-transform:uppercase;letter-spacing:.5px}
@@ -43,8 +46,7 @@
   <p>Water &amp; electricity — deposits, charges and balance by month</p>
 </div>
 
-<div class="wrap" id="wrap">
-  <!-- login -->
+<div class="wrap">
   <div class="lbox" id="loginBox">
     <h2>Sign in</h2>
     <label for="u">Username</label>
@@ -56,88 +58,119 @@
     <div class="hint"><b>Demo logins:</b><br>
       ivanov / ivanov123 &nbsp;·&nbsp; petrov / petrov123 &nbsp;·&nbsp; sidorov / sidorov123</div>
   </div>
-
-  <!-- statement (built by JS) -->
   <div id="statement"></div>
 </div>
 
-<div class="ver">build v4</div>
+<div class="ver">build v5 · live</div>
 
 <script>
-var DATA = {
-  ivanov: { name:"Ivanov", rows:[
-    {m:"2026-03", w:4494.00, e:1284.00, t:5778.00, d:5000, b:-778.00},
-    {m:"2026-04", w:3210.00, e:1391.00, t:4601.00, d:3000, b:-2379.00}
-  ]},
-  petrov: { name:"Petrov", rows:[
-    {m:"2026-03", w:4108.80, e:1177.00, t:5285.80, d:6000, b:714.20},
-    {m:"2026-04", w:3723.60, e:1123.50, t:4847.10, d:0,    b:-4132.90}
-  ]},
-  sidorov: { name:"Sidorov", rows:[
-    {m:"2026-03", w:6034.80, e:1498.00, t:7532.80, d:4000, b:-3532.80},
-    {m:"2026-04", w:5521.20, e:1391.00, t:6912.20, d:4000, b:-6445.00}
-  ]}
+// ---- CONFIG ----
+var SHEET_ID = "1xUw9BAnSpIAF_tbFR8elrUhhYj8nLVjQfEO8Z6oxxzc";
+// username -> {pw, tab (exact sheet-tab name), name}
+var OWNERS = {
+  ivanov:  {pw:"ivanov123",  tab:"Ivanov",  name:"Ivanov"},
+  petrov:  {pw:"petrov123",  tab:"Petrov",  name:"Petrov"},
+  sidorov: {pw:"sidorov123", tab:"Sidorov", name:"Sidorov"}
 };
-var CREDS = { ivanov:"ivanov123", petrov:"petrov123", sidorov:"sidorov123" };
+// built-in fallback (used only if the sheet can't be reached)
+var FALLBACK = {
+  ivanov:[{m:"2026-03",w:4494,e:1284,t:5778,d:5000,b:-778},{m:"2026-04",w:3210,e:1391,t:4601,d:3000,b:-2379}],
+  petrov:[{m:"2026-03",w:4108.8,e:1177,t:5285.8,d:6000,b:714.2},{m:"2026-04",w:3723.6,e:1123.5,t:4847.1,d:0,b:-4132.9}],
+  sidorov:[{m:"2026-03",w:6034.8,e:1498,t:7532.8,d:4000,b:-3532.8},{m:"2026-04",w:5521.2,e:1391,t:6912.2,d:4000,b:-6445}]
+};
 
 function money(n){ return (n<0?"-":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}) + " THB"; }
+function num(s){ var v=parseFloat(String(s).replace(/[^0-9.\-]/g,"")); return isNaN(v)?0:v; }
+function csvUrl(tab){ return "https://docs.google.com/spreadsheets/d/"+SHEET_ID+"/gviz/tq?tqx=out:csv&sheet="+encodeURIComponent(tab)+"&t="+Date.now(); }
 
-function doLogin(){
-  var msg = document.getElementById('msg');
-  try{
-    var u = (document.getElementById('u').value||"").trim().toLowerCase();
-    var p = (document.getElementById('p').value||"").trim();
-    if(!CREDS[u] || CREDS[u] !== p){
-      msg.className = "msg err";
-      msg.textContent = "Wrong username or password.";
-      return;
-    }
-    msg.className = "msg ok";
-    msg.textContent = "Signed in — loading your statement…";
-    showStatement(u);
-  }catch(err){
-    msg.className = "msg err";
-    msg.textContent = "Error: " + err.message;
+function parseCSV(text){
+  var rows=[],row=[],cur="",q=false;
+  for(var i=0;i<text.length;i++){
+    var c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=c; }
+    else { if(c==='"')q=true;
+      else if(c===','){row.push(cur);cur="";}
+      else if(c==='\n'){row.push(cur);rows.push(row);row=[];cur="";}
+      else if(c==='\r'){}
+      else cur+=c; }
   }
+  if(cur!==""||row.length){row.push(cur);rows.push(row);}
+  return rows;
 }
 
-function showStatement(owner){
-  var o = DATA[owner];
-  var totD=0, totC=0, rowsHtml="";
-  for(var i=0;i<o.rows.length;i++){
-    var r=o.rows[i]; totD+=r.d; totC+=r.t;
-    var cls = r.b<0 ? "pay" : "credit";
-    rowsHtml += "<tr><td>"+r.m+"</td><td>"+money(r.w)+"</td><td>"+money(r.e)+"</td><td>"+
-                money(r.t)+"</td><td>"+money(r.d)+"</td><td class='"+cls+"'>"+money(r.b)+"</td></tr>";
+// turn sheet rows into [{m,w,e,t,d,b}]
+function rowsFromSheet(text){
+  var rows=parseCSV(text), h=-1;
+  for(var i=0;i<rows.length;i++){
+    var j=rows[i].join(",").toLowerCase();
+    if(j.indexOf("deposit")>=0 && j.indexOf("balance")>=0){ h=i; break; }
   }
-  var bal = o.rows[o.rows.length-1].b;
-  var balColor = bal<0 ? "#c0392b" : "#1e8449";
-  var tag = bal<0 ? "To pay" : "In credit";
+  if(h<0) throw new Error("sheet layout not found");
+  var out=[];
+  for(var k=h+1;k<rows.length;k++){
+    var r=rows[k]; if(!r) continue;
+    var m=(r[1]||"").trim();
+    if(!m || m.toLowerCase()==="opening") continue;
+    out.push({ m:m, w:num(r[5]), e:num(r[9]), t:num(r[10]), d:num(r[0]), b:num(r[11]) });
+  }
+  if(!out.length) throw new Error("no month rows");
+  return out;
+}
 
-  var html =
-    "<button class='backbtn' type='button' onclick='signOut()'>&larr; Sign out</button>" +
-    "<div class='who'>"+o.name+"</div>" +
-    "<div class='cards'>" +
-      "<div class='card'><div class='k'>Current balance</div><div class='v' style='color:"+balColor+"'>"+money(bal)+"</div><div style='color:"+balColor+";font-weight:bold;font-size:13px'>"+tag+"</div></div>" +
-      "<div class='card'><div class='k'>Total deposited</div><div class='v'>"+money(totD)+"</div></div>" +
-      "<div class='card'><div class='k'>Total charged</div><div class='v'>"+money(totC)+"</div></div>" +
-    "</div>" +
-    "<table><thead><tr><th>Month</th><th>Water charge</th><th>Elec charge</th><th>Total charge</th><th>Deposited</th><th>Balance</th></tr></thead>" +
-    "<tbody>"+rowsHtml+"</tbody></table>" +
+function doLogin(){
+  var msg=document.getElementById('msg');
+  try{
+    var u=(document.getElementById('u').value||"").trim().toLowerCase();
+    var p=(document.getElementById('p').value||"").trim();
+    if(!OWNERS[u] || OWNERS[u].pw!==p){ msg.className="msg err"; msg.textContent="Wrong username or password."; return; }
+    msg.className="msg ok"; msg.textContent="Signed in — loading your statement…";
+    loadOwner(u);
+  }catch(err){ msg.className="msg err"; msg.textContent="Error: "+err.message; }
+}
+
+function loadOwner(u){
+  var o=OWNERS[u];
+  // show shell immediately so it's never blank
+  showStatement(o.name, FALLBACK[u], "loading");
+  fetch(csvUrl(o.tab))
+    .then(function(res){ if(!res.ok) throw new Error("HTTP "+res.status); return res.text(); })
+    .then(function(text){ showStatement(o.name, rowsFromSheet(text), "live"); })
+    .catch(function(err){ showStatement(o.name, FALLBACK[u], "fallback"); });
+}
+
+function showStatement(name, rows, mode){
+  var totD=0,totC=0,html="";
+  for(var i=0;i<rows.length;i++){
+    var r=rows[i]; totD+=r.d; totC+=r.t;
+    var cls=r.b<0?"pay":"credit";
+    html+="<tr><td>"+r.m+"</td><td>"+money(r.w)+"</td><td>"+money(r.e)+"</td><td>"+money(r.t)+"</td><td>"+money(r.d)+"</td><td class='"+cls+"'>"+money(r.b)+"</td></tr>";
+  }
+  var bal=rows.length?rows[rows.length-1].b:0;
+  var bc=bal<0?"#c0392b":"#1e8449", tag=bal<0?"To pay":"In credit";
+  var status = mode==="live" ? "<div class='status live'>&#10003; Live from the Google Sheet — edits appear on refresh</div>"
+             : mode==="loading" ? "<div class='status'>Loading live data…</div>"
+             : "<div class='status fallback'>&#9888; Couldn't reach the sheet — showing built-in sample data</div>";
+
+  var out=
+    "<button class='backbtn' type='button' onclick='signOut()'>&larr; Sign out</button>"+
+    "<div class='who'>"+name+"</div>"+status+
+    "<div class='cards'>"+
+      "<div class='card'><div class='k'>Current balance</div><div class='v' style='color:"+bc+"'>"+money(bal)+"</div><div style='color:"+bc+";font-weight:bold;font-size:13px'>"+tag+"</div></div>"+
+      "<div class='card'><div class='k'>Total deposited</div><div class='v'>"+money(totD)+"</div></div>"+
+      "<div class='card'><div class='k'>Total charged</div><div class='v'>"+money(totC)+"</div></div>"+
+    "</div>"+
+    "<table><thead><tr><th>Month</th><th>Water charge</th><th>Elec charge</th><th>Total charge</th><th>Deposited</th><th>Balance</th></tr></thead><tbody>"+html+"</tbody></table>"+
     "<div class='note'>Balance carries forward each month. Green = credit; red = amount to pay. Charges include 7% VAT.</div>";
 
-  document.getElementById('loginBox').style.display = "none";
-  var s = document.getElementById('statement');
-  s.innerHTML = html;
-  s.scrollIntoView();
+  document.getElementById('loginBox').style.display="none";
+  var s=document.getElementById('statement'); s.innerHTML=out; s.scrollIntoView();
 }
 
 function signOut(){
-  document.getElementById('statement').innerHTML = "";
-  document.getElementById('loginBox').style.display = "";
-  document.getElementById('u').value = "";
-  document.getElementById('p').value = "";
-  var msg = document.getElementById('msg'); msg.textContent = ""; msg.className = "msg";
+  document.getElementById('statement').innerHTML="";
+  document.getElementById('loginBox').style.display="";
+  document.getElementById('u').value=""; document.getElementById('p').value="";
+  var msg=document.getElementById('msg'); msg.textContent=""; msg.className="msg";
 }
 </script>
 </body>
