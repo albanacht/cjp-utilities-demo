@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>CJP Utilities — Owner Portal</title>
+<style>
+  :root{--brand:#1F4E5F;--bg:#f4f6f7;--card:#fff;--line:#e2e8ea;
+        --pay:#c0392b;--credit:#1e8449;--muted:#667;}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:#233;}
+  header{background:var(--brand);color:#fff;padding:16px 22px;display:flex;justify-content:space-between;align-items:center}
+  header h1{margin:0;font-size:18px;letter-spacing:.3px}
+  header p{margin:3px 0 0;opacity:.8;font-size:12px}
+  #logout{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.4);color:#fff;
+          padding:6px 12px;border-radius:8px;cursor:pointer;font-size:13px}
+  .wrap{max-width:860px;margin:22px auto;padding:0 16px;}
+  .cards{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;flex:1;min-width:160px;
+        box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .card .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+  .card .v{font-size:26px;font-weight:bold;margin-top:6px}
+  .who{font-size:15px;font-weight:bold;margin-bottom:14px}
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{padding:11px 12px;text-align:right;font-size:14px;border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left}
+  thead th{background:var(--brand);color:#fff;font-size:12px;letter-spacing:.4px}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:nth-child(even){background:#fafcfc}
+  td.bal.pay{color:var(--pay);font-weight:bold}
+  td.bal.credit{color:var(--credit);font-weight:bold}
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:13px;font-weight:bold;margin-top:6px}
+  .pill.pay{background:#fdecea;color:var(--pay)}
+  .pill.credit{background:#eafaf1;color:var(--credit)}
+  .note{font-size:12px;color:var(--muted);margin-top:10px}
+  /* login */
+  #login{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--brand)}
+  .lbox{background:#fff;border-radius:16px;padding:30px 28px;width:330px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .lbox h2{margin:0 0 4px;color:var(--brand);font-size:20px}
+  .lbox .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+  .lbox label{display:block;font-size:13px;font-weight:bold;margin:12px 0 5px}
+  .lbox input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:15px}
+  .lbox button{width:100%;margin-top:18px;padding:11px;background:var(--brand);color:#fff;border:0;
+               border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer}
+  .err{color:var(--pay);font-size:13px;margin-top:10px;min-height:16px}
+  .hint{font-size:11px;color:#8894a0;margin-top:16px;line-height:1.5;border-top:1px solid var(--line);padding-top:12px}
+  .hidden{display:none}
+  .foot{font-size:11px;color:#99a;text-align:center;margin:26px 0}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login">
+  <div class="lbox">
+    <h2>CJP Utilities</h2>
+    <div class="sub">Owner portal — sign in</div>
+    <label for="u">Username</label>
+    <input id="u" autocomplete="username" autofocus/>
+    <label for="p">Password</label>
+    <input id="p" type="password" autocomplete="current-password"/>
+    <button id="loginBtn">Sign in</button>
+    <div class="err" id="err"></div>
+    <div class="hint"><b>Demo logins:</b><br>
+      maria / maria123 &nbsp;·&nbsp; john / john123<br>
+      aisha / aisha123 &nbsp;·&nbsp; peter / peter123</div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <header>
+    <div>
+      <h1>CJP Utilities — Owner Statement</h1>
+      <p>Water &amp; electricity — deposits, charges and balance by month</p>
+    </div>
+    <button id="logout">Sign out</button>
+  </header>
+  <div class="wrap">
+    <div class="who" id="who"></div>
+    <div class="cards">
+      <div class="card"><div class="k">Current balance</div><div class="v" id="balv"></div><div id="balpill"></div></div>
+      <div class="card"><div class="k">Total deposited</div><div class="v" id="depv"></div></div>
+      <div class="card"><div class="k">Total charged</div><div class="v" id="chgv"></div></div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Month</th><th>Water charge</th><th>Elec charge</th><th>Total charge</th><th>Deposited</th><th>Balance</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="note">Balance carries forward each month.
+      <b style="color:var(--credit)">Green</b> = credit on account;
+      <b style="color:var(--pay)">red</b> = amount to pay.</div>
+    <div class="foot">Demo with sample data. Login here is for demonstration only and is not secure.</div>
+  </div>
+</div>
+
+<script>
+const DATA  = {"OWN-001": {"unit": "A-101", "name": "Maria Santos", "rate_w": 1.2, "rate_e": 0.18, "rows": [{"month": "2026-03", "water_read": 1035, "water_used": 35, "water_charge": 42.0, "elec_read": 5120, "elec_used": 120, "elec_charge": 21.6, "total_charge": 63.6, "deposit": 120, "balance": 56.4}, {"month": "2026-04", "water_read": 1072, "water_used": 37, "water_charge": 44.4, "elec_read": 5260, "elec_used": 140, "elec_charge": 25.2, "total_charge": 69.6, "deposit": 60, "balance": 46.8}, {"month": "2026-05", "water_read": 1110, "water_used": 38, "water_charge": 45.6, "elec_read": 5385, "elec_used": 125, "elec_charge": 22.5, "total_charge": 68.1, "deposit": 120, "balance": 98.7}, {"month": "2026-06", "water_read": 1151, "water_used": 41, "water_charge": 49.2, "elec_read": 5540, "elec_used": 155, "elec_charge": 27.9, "total_charge": 77.1, "deposit": 60, "balance": 81.6}]}, "OWN-002": {"unit": "A-102", "name": "John Miller", "rate_w": 1.2, "rate_e": 0.18, "rows": [{"month": "2026-03", "water_read": 878, "water_used": 28, "water_charge": 33.6, "elec_read": 4290, "elec_used": 90, "elec_charge": 16.2, "total_charge": 49.8, "deposit": 100, "balance": 75.2}, {"month": "2026-04", "water_read": 905, "water_used": 27, "water_charge": 32.4, "elec_read": 4380, "elec_used": 90, "elec_charge": 16.2, "total_charge": 48.6, "deposit": 0, "balance": 26.6}, {"month": "2026-05", "water_read": 939, "water_used": 34, "water_charge": 40.8, "elec_read": 4495, "elec_used": 115, "elec_charge": 20.7, "total_charge": 61.5, "deposit": 150, "balance": 115.1}, {"month": "2026-06", "water_read": 970, "water_used": 31, "water_charge": 37.2, "elec_read": 4600, "elec_used": 105, "elec_charge": 18.9, "total_charge": 56.1, "deposit": 0, "balance": 59.0}]}, "OWN-003": {"unit": "B-201", "name": "Aisha Khan", "rate_w": 1.2, "rate_e": 0.18, "rows": [{"month": "2026-03", "water_read": 1345, "water_used": 45, "water_charge": 54.0, "elec_read": 6230, "elec_used": 130, "elec_charge": 23.4, "total_charge": 77.4, "deposit": 200, "balance": 82.6}, {"month": "2026-04", "water_read": 1390, "water_used": 45, "water_charge": 54.0, "elec_read": 6360, "elec_used": 130, "elec_charge": 23.4, "total_charge": 77.4, "deposit": 100, "balance": 105.2}, {"month": "2026-05", "water_read": 1441, "water_used": 51, "water_charge": 61.2, "elec_read": 6500, "elec_used": 140, "elec_charge": 25.2, "total_charge": 86.4, "deposit": 0, "balance": 18.8}, {"month": "2026-06", "water_read": 1489, "water_used": 48, "water_charge": 57.6, "elec_read": 6640, "elec_used": 140, "elec_charge": 25.2, "total_charge": 82.8, "deposit": 150, "balance": 86.0}]}, "OWN-004": {"unit": "B-202", "name": "Peter Novak", "rate_w": 1.2, "rate_e": 0.18, "rows": [{"month": "2026-03", "water_read": 628, "water_used": 28, "water_charge": 33.6, "elec_read": 3400, "elec_used": 100, "elec_charge": 18.0, "total_charge": 51.6, "deposit": 90, "balance": 38.4}, {"month": "2026-04", "water_read": 659, "water_used": 31, "water_charge": 37.2, "elec_read": 3505, "elec_used": 105, "elec_charge": 18.9, "total_charge": 56.1, "deposit": 90, "balance": 72.3}, {"month": "2026-05", "water_read": 688, "water_used": 29, "water_charge": 34.8, "elec_read": 3600, "elec_used": 95, "elec_charge": 17.1, "total_charge": 51.9, "deposit": 90, "balance": 110.4}, {"month": "2026-06", "water_read": 721, "water_used": 33, "water_charge": 39.6, "elec_read": 3720, "elec_used": 120, "elec_charge": 21.6, "total_charge": 61.2, "deposit": 90, "balance": 139.2}]}};
+const CREDS = {"maria": {"pw": "maria123", "id": "OWN-001"}, "john": {"pw": "john123", "id": "OWN-002"}, "aisha": {"pw": "aisha123", "id": "OWN-003"}, "peter": {"pw": "peter123", "id": "OWN-004"}};
+const money = n => (n<0?"-$":"$") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+
+function render(id){
+  const o=DATA[id];
+  document.getElementById('who').textContent = `${o.unit} · ${o.name}`;
+  const tb=document.getElementById('rows'); tb.innerHTML='';
+  let totDep=0, totChg=0;
+  o.rows.forEach(r=>{
+    totDep+=r.deposit; totChg+=r.total_charge;
+    const cls = r.balance<0 ? 'pay':'credit';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${r.month}</td><td>${money(r.water_charge)}</td><td>${money(r.elec_charge)}</td>`+
+                 `<td>${money(r.total_charge)}</td><td>${money(r.deposit)}</td>`+
+                 `<td class="bal ${cls}">${money(r.balance)}</td>`;
+    tb.appendChild(tr);
+  });
+  const bal=o.rows[o.rows.length-1].balance;
+  const balv=document.getElementById('balv');
+  balv.textContent=money(bal); balv.style.color = bal<0?'var(--pay)':'var(--credit)';
+  document.getElementById('balpill').innerHTML =
+    bal<0 ? `<span class="pill pay">To pay</span>` : `<span class="pill credit">In credit</span>`;
+  document.getElementById('depv').textContent=money(totDep);
+  document.getElementById('chgv').textContent=money(totChg);
+}
+function tryLogin(){
+  const u=document.getElementById('u').value.trim().toLowerCase();
+  const p=document.getElementById('p').value;
+  const rec=CREDS[u];
+  if(rec && rec.pw===p){
+    document.getElementById('err').textContent='';
+    document.getElementById('login').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    render(rec.id);
+  } else {
+    document.getElementById('err').textContent='Wrong username or password.';
+  }
+}
+document.getElementById('loginBtn').addEventListener('click',tryLogin);
+document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')tryLogin();});
+document.getElementById('u').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('p').focus();});
+document.getElementById('logout').addEventListener('click',()=>{
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('login').classList.remove('hidden');
+  document.getElementById('u').value=''; document.getElementById('p').value='';
+});
+</script>
+</body>
+</html>
